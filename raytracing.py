@@ -86,8 +86,7 @@ def trace_ray(rayO, rayD):
     toL = normalize(L - M)
     toO = normalize(O - M)
     # Shadow: find if the point is shadowed or not.
-    l = [intersect(M + N * .0001, toL, obj_sh)
-            for k, obj_sh in enumerate(scene) if k != obj_idx]
+    l = [intersect(M + N * .0001, toL, obj_sh) for k, obj_sh in enumerate(scene) if k != obj_idx]
     if l and min(l) < np.inf:
         return
     # Start computing the color.
@@ -99,24 +98,73 @@ def trace_ray(rayO, rayD):
     return obj, M, N, col_ray
 
 
-def add_sphere(position, radius, color):
+def reflection(rayD, normal):
+    return normalize(rayD - 2. * np.dot(rayD, normal) * normal)
+
+
+# https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
+# See details in  (Head : Refraction)
+def refraction(rayD, normal, refr_cff):
+    cos_theta_1 = - np.dot(rayD, normal)
+    c1 = cos_theta_1
+    c2_squared = 1. - refr_cff ** 2 * (1. - c1 ** 2)
+    # total internal reflection
+    if c2_squared < 0.:
+        return
+    c2 = np.math.sqrt(c2_squared)
+    return refr_cff * rayD + (refr_cff * c1 - c2) * normal
+
+
+def trace_ray_rec(rayO, rayD, light_intensity, depth):
+    if depth > depth_max or light_intensity == 0.:
+        return np.zeros(3)
+
+    tracing_result = trace_ray(rayO, rayD)
+    if not tracing_result:
+        return np.zeros(3)
+    obj, M, normal, col_ray = tracing_result
+    color_result = col_ray * light_intensity
+
+    refr_cff = 1. / obj['refraction']
+    inside_surface = np.dot(rayD, normal)
+    if inside_surface > 0.:
+        # ray goes from the inside of the surface
+        normal = -normal
+        refr_cff = 1. / refr_cff
+
+    # create reflected ray
+    refl_rayO = M + normal * .0001
+    refl_rayD = reflection(rayD, normal)
+    color_result += trace_ray_rec(refl_rayO, refl_rayD, light_intensity * obj['reflection'], depth + 1)
+
+    # create refracted ray
+    refr_rayO = M - normal * .0001
+    refr_rayD = refraction(rayD, normal, refr_cff)
+    if refr_rayD is not None:
+        color_result += trace_ray_rec(refr_rayO, refr_rayD, light_intensity * obj['transparency'], depth + 1)
+
+    return color_result
+
+
+def add_sphere(position, radius, color, refl_cff=.25, refr_cff=1., transparency=0.):
     return dict(type='sphere', position=np.array(position), radius=np.array(radius), color=np.array(color),
-                reflection=.5)
+                reflection=refl_cff, refraction=refr_cff, transparency=transparency)
 
 
-def add_plane(position, normal):
+def add_plane(position, normal, refl_cff=.25, refr_cff=1., transparency=0.):
     return dict(type='plane', position=np.array(position), normal=np.array(normal),
                 color=lambda M: (color_plane0 if (int(M[0] * 2) % 2) == (int(M[2] * 2) % 2) else color_plane1),
-                diffuse_c=.75, specular_c=.5, reflection=.25)
+                diffuse_c=.75, specular_c=.5, reflection=refl_cff, refraction=refr_cff, transparency=transparency)
 
 
 # List of objects.
 color_plane0 = 1. * np.ones(3)
 color_plane1 = 0. * np.ones(3)
-scene = [add_sphere([.75, .1, 1.], .6, [0., 0., 1.]),
-         add_sphere([-.75, .1, 2.25], .6, [.5, .223, .5]),
-         add_sphere([-2.75, .1, 3.5], .6, [1., .572, .184]),
-         add_plane([0., -.5, 0.], [0., 1., 0.]),
+scene = [add_sphere([.75, .1, 1.], .6, [0., 0., 1.], refl_cff=.25, refr_cff=1.3, transparency=.9),
+         add_sphere([.75, .1, 1.], .3, [0., 1., 0.], refl_cff=0., refr_cff=1.5, transparency=0.),
+         add_sphere([-.75, .1, 2.25], .6, [.5, .223, .5], refl_cff=.25, refr_cff=1., transparency=1.),
+         add_sphere([-2.75, .1, 3.5], .6, [1., .572, .184], refl_cff=.25, refr_cff=1.7, transparency=.6),
+         add_plane([0., -.5, 0.], [0., 1., 0.], refl_cff=.3, refr_cff=1., transparency=0.),
          ]
 
 # Light position and color.
@@ -147,20 +195,7 @@ for i, x in enumerate(np.linspace(S[0], S[2], w)):
         col[:] = 0
         Q[:2] = (x, y)
         D = normalize(Q - O)
-        depth = 0
-        rayO, rayD = O, D
-        reflection = 1.
-        # Loop through initial and secondary rays.
-        while depth < depth_max:
-            traced = trace_ray(rayO, rayD)
-            if not traced:
-                break
-            obj, M, N, col_ray = traced
-            # Reflection: create a new ray.
-            rayO, rayD = M + N * .0001, normalize(rayD - 2 * np.dot(rayD, N) * N)
-            depth += 1
-            col += reflection * col_ray
-            reflection *= obj.get('reflection', 1.)
+        col = trace_ray_rec(O, D, 1., 1)
         img[h - j - 1, i, :] = np.clip(col, 0, 1)
 
-plt.imsave('fig.png', img)
+plt.imsave('fig_new.png', img)
