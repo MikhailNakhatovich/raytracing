@@ -102,11 +102,8 @@ def reflection(rayD, normal):
     return normalize(rayD - 2. * np.dot(rayD, normal) * normal)
 
 
-# https://www.scratchapixel.com/lessons/3d-basic-rendering/introduction-to-shading/reflection-refraction-fresnel
-# See details in  (Head : Refraction)
 def refraction(rayD, normal, refr_cff):
-    cos_theta_1 = - np.dot(rayD, normal)
-    c1 = cos_theta_1
+    c1 = - np.dot(rayD, normal)
     c2_squared = 1. - refr_cff ** 2 * (1. - c1 ** 2)
     # total internal reflection
     if c2_squared < 0.:
@@ -198,4 +195,4 @@ for i, x in enumerate(np.linspace(S[0], S[2], w)):
         col = trace_ray_rec(O, D, 1., 1)
         img[h - j - 1, i, :] = np.clip(col, 0, 1)
 
-plt.imsave('fig_new.png', img)
+plt.imsave('fig.png', img)
