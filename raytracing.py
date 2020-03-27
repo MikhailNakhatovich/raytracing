@@ -4,6 +4,11 @@ import matplotlib.pyplot as plt
 w = 400
 h = 300
 
+# Calculating the intersection of the ray, starting from some point of the object's surface, with other objects,
+# we need to offset the ray's start point by normal from the surface.
+# Otherwise the ray may intersect current object in it's starting point.
+surface_offset = .0001
+
 
 def normalize(x):
     x /= np.linalg.norm(x)
@@ -86,7 +91,7 @@ def trace_ray(rayO, rayD):
     toL = normalize(L - M)
     toO = normalize(O - M)
     # Shadow: find if the point is shadowed or not.
-    l = [intersect(M + N * .0001, toL, obj_sh) for k, obj_sh in enumerate(scene) if k != obj_idx]
+    l = [intersect(M + N * surface_offset, toL, obj_sh) for k, obj_sh in enumerate(scene) if k != obj_idx]
     if l and min(l) < np.inf:
         return
     # Start computing the color.
@@ -130,12 +135,12 @@ def trace_ray_rec(rayO, rayD, light_intensity, depth):
         refr_cff = 1. / refr_cff
 
     # create reflected ray
-    refl_rayO = M + normal * .0001
+    refl_rayO = M + normal * surface_offset
     refl_rayD = reflection(rayD, normal)
     color_result += trace_ray_rec(refl_rayO, refl_rayD, light_intensity * obj['reflection'], depth + 1)
 
     # create refracted ray
-    refr_rayO = M - normal * .0001
+    refr_rayO = M - normal * surface_offset
     refr_rayD = refraction(rayD, normal, refr_cff)
     if refr_rayD is not None:
         color_result += trace_ray_rec(refr_rayO, refr_rayD, light_intensity * obj['transparency'], depth + 1)
