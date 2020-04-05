@@ -19,3 +19,7 @@ pip install -r requirements.txt
 ```
 python raytracing.py
 ```
+
+## Result picture
+![Result picture](fig.png)
+

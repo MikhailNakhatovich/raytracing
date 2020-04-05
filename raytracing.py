@@ -1,8 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-w = 400
-h = 300
+W = 400
+H = 300
+
+# Calculating the intersection of the ray, starting from some point of the object's surface, with other objects,
+# we need to offset the ray's start point by normal from the surface.
+# Otherwise the ray may intersect current object in it's starting point.
+SURFACE_OFFSET = .0001
 
 
 def normalize(x):
@@ -86,8 +91,7 @@ def trace_ray(rayO, rayD):
     toL = normalize(L - M)
     toO = normalize(O - M)
     # Shadow: find if the point is shadowed or not.
-    l = [intersect(M + N * .0001, toL, obj_sh)
-            for k, obj_sh in enumerate(scene) if k != obj_idx]
+    l = [intersect(M + N * SURFACE_OFFSET, toL, obj_sh) for k, obj_sh in enumerate(scene) if k != obj_idx]
     if l and min(l) < np.inf:
         return
     # Start computing the color.
@@ -99,24 +103,70 @@ def trace_ray(rayO, rayD):
     return obj, M, N, col_ray
 
 
-def add_sphere(position, radius, color):
+def reflection(rayD, normal):
+    return normalize(rayD - 2. * np.dot(rayD, normal) * normal)
+
+
+def refraction(rayD, normal, refr_cff):
+    c1 = - np.dot(rayD, normal)
+    c2_squared = 1. - refr_cff ** 2 * (1. - c1 ** 2)
+    # total internal reflection
+    if c2_squared < 0.:
+        return
+    c2 = np.math.sqrt(c2_squared)
+    return refr_cff * rayD + (refr_cff * c1 - c2) * normal
+
+
+def trace_ray_rec(rayO, rayD, light_intensity, depth):
+    if depth > depth_max or light_intensity == 0.:
+        return np.zeros(3)
+
+    tracing_result = trace_ray(rayO, rayD)
+    if not tracing_result:
+        return np.zeros(3)
+    obj, M, normal, col_ray = tracing_result
+    color_result = col_ray * light_intensity
+
+    refr_cff = 1. / obj['refraction']
+    inside_surface = np.dot(rayD, normal)
+    if inside_surface > 0.:
+        # ray goes from the inside of the surface
+        normal = -normal
+        refr_cff = 1. / refr_cff
+
+    # create reflected ray
+    refl_rayO = M + normal * SURFACE_OFFSET
+    refl_rayD = reflection(rayD, normal)
+    color_result += trace_ray_rec(refl_rayO, refl_rayD, light_intensity * obj['reflection'], depth + 1)
+
+    # create refracted ray
+    refr_rayO = M - normal * SURFACE_OFFSET
+    refr_rayD = refraction(rayD, normal, refr_cff)
+    if refr_rayD is not None:
+        color_result += trace_ray_rec(refr_rayO, refr_rayD, light_intensity * obj['transparency'], depth + 1)
+
+    return color_result
+
+
+def add_sphere(position, radius, color, refl_cff=.25, refr_cff=1., transparency=0.):
     return dict(type='sphere', position=np.array(position), radius=np.array(radius), color=np.array(color),
-                reflection=.5)
+                reflection=refl_cff, refraction=refr_cff, transparency=transparency)
 
 
-def add_plane(position, normal):
+def add_plane(position, normal, refl_cff=.25, refr_cff=1., transparency=0.):
     return dict(type='plane', position=np.array(position), normal=np.array(normal),
                 color=lambda M: (color_plane0 if (int(M[0] * 2) % 2) == (int(M[2] * 2) % 2) else color_plane1),
-                diffuse_c=.75, specular_c=.5, reflection=.25)
+                diffuse_c=.75, specular_c=.5, reflection=refl_cff, refraction=refr_cff, transparency=transparency)
 
 
 # List of objects.
 color_plane0 = 1. * np.ones(3)
 color_plane1 = 0. * np.ones(3)
-scene = [add_sphere([.75, .1, 1.], .6, [0., 0., 1.]),
-         add_sphere([-.75, .1, 2.25], .6, [.5, .223, .5]),
-         add_sphere([-2.75, .1, 3.5], .6, [1., .572, .184]),
-         add_plane([0., -.5, 0.], [0., 1., 0.]),
+scene = [add_sphere([.75, .1, 1.], .6, [0., 0., 1.], refl_cff=.25, refr_cff=1.3, transparency=.9),
+         add_sphere([.75, .1, 1.], .3, [0., 1., 0.], refl_cff=0., refr_cff=1.5, transparency=0.),
+         add_sphere([-.75, .1, 2.25], .6, [.5, .223, .5], refl_cff=.25, refr_cff=1., transparency=1.),
+         add_sphere([-2.75, .1, 3.5], .6, [1., .572, .184], refl_cff=.25, refr_cff=1.7, transparency=.6),
+         add_plane([0., -.5, 0.], [0., 1., 0.], refl_cff=.3, refr_cff=1., transparency=0.),
          ]
 
 # Light position and color.
@@ -133,34 +183,21 @@ depth_max = 5  # Maximum number of light reflections.
 col = np.zeros(3)  # Current color.
 O = np.array([0., 0.35, -1.])  # Camera.
 Q = np.array([0., 0., 0.])  # Camera pointing to.
-img = np.zeros((h, w, 3))
+img = np.zeros((H, W, 3))
 
-r = float(w) / h
+r = float(W) / H
 # Screen coordinates: x0, y0, x1, y1.
 S = (-1., -1. / r + .25, 1., 1. / r + .25)
 
 # Loop through all pixels.
-for i, x in enumerate(np.linspace(S[0], S[2], w)):
+for i, x in enumerate(np.linspace(S[0], S[2], W)):
     if i % 10 == 0:
-        print(i / float(w) * 100, "%")
-    for j, y in enumerate(np.linspace(S[1], S[3], h)):
+        print(i / float(W) * 100, "%")
+    for j, y in enumerate(np.linspace(S[1], S[3], H)):
         col[:] = 0
         Q[:2] = (x, y)
         D = normalize(Q - O)
-        depth = 0
-        rayO, rayD = O, D
-        reflection = 1.
-        # Loop through initial and secondary rays.
-        while depth < depth_max:
-            traced = trace_ray(rayO, rayD)
-            if not traced:
-                break
-            obj, M, N, col_ray = traced
-            # Reflection: create a new ray.
-            rayO, rayD = M + N * .0001, normalize(rayD - 2 * np.dot(rayD, N) * N)
-            depth += 1
-            col += reflection * col_ray
-            reflection *= obj.get('reflection', 1.)
-        img[h - j - 1, i, :] = np.clip(col, 0, 1)
+        col = trace_ray_rec(O, D, 1., 1)
+        img[H - j - 1, i, :] = np.clip(col, 0, 1)
 
 plt.imsave('fig.png', img)
